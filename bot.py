@@ -19,7 +19,6 @@ from scanner.token import get_token_info
 from scanner.trading import trading_enabled
 from scanner.dexscreener import fetch_dex_data
 from scanner.liquidity import lp_analysis
-
 from scanner.goplus import fetch_goplus
 from scanner.verdict import verdict_engine
 from formatter import format_report
@@ -80,14 +79,13 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trading = trading_enabled(True, market)
     goplus = fetch_goplus(chain, ca)
 
-    # ───────── LP INFO (PRIORITY ORDER) ─────────
-    # 1️⃣ DexScreener (authoritative)
-    # 2️⃣ On-chain burn % fallback
-    # 3️⃣ Known lockers (UNCX / TeamFinance)
-
+    # ───────── LP INFO (FINAL & CORRECT) ─────────
     lp_info = {"status": "unknown"}
 
-    if market and market.get("lp"):
+    pair_address = market.get("pair_address") if market else None
+
+    # 1️⃣ DexScreener explicit LP status (rare)
+    if market and isinstance(market.get("lp"), dict):
         ds_lp = market["lp"]
         if ds_lp.get("status") == "burned":
             lp_info = {
@@ -100,16 +98,12 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "status": "locked",
                 "locker": ds_lp.get("locker", "DexScreener"),
                 "unlock_ts": ds_lp.get("unlockTs"),
+                "source": "dexscreener",
             }
 
-    # 2️⃣ On-chain LP verification (only if still unknown)
-    if lp_info["status"] == "unknown" and market:
-        try:
-            pair_addr = market.get("pair_address")
-            if pair_addr:
-                lp_info = lp_analysis(w3, pair_addr)
-        except Exception:
-            pass
+    # 2️⃣ On-chain LP burn verification (MAIN PATH)
+    if lp_info["status"] == "unknown" and pair_address:
+        lp_info = lp_analysis(w3, pair_address)
 
     # ───────── Data for verdict / formatter ─────────
     data = {
