@@ -196,16 +196,15 @@ def format_report(token: dict, verdict: dict, market: dict, lp_info: dict, histo
         ])
 
     # ───────── Socials (INCLUDING WEBSITE) ─────────
-    socials = market.get("socials", {}) if market else {}
+        socials = market.get("socials", {}) if market else {}
+
     if socials:
         lines.append("👥 Socials")
-        if socials.get("twitter"):
-            lines.append(f"└ TWITTER: {socials['twitter']}")
-        if socials.get("telegram"):
-            lines.append(f"└ TELEGRAM: {socials['telegram']}")
-        if socials.get("website"):
-            lines.append(f"└ WEBSITE: {socials['website']}")
+        for k, v in socials.items():
+            label = "WEBSITE" if k.lower() == "website" else k.upper()
+            lines.append(f"└ {label}: {v}")
         lines.append("")
+
 
     # ───────── Footer ─────────
     lines.extend([
