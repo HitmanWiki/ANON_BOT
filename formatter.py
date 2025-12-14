@@ -69,7 +69,8 @@ def format_report(token: dict, verdict: dict, market: dict, lp_info: dict, histo
     confidence = verdict.get("confidence", "Medium")
 
     lines.extend([
-        f"🧾 Risk Summary: {confidence} immediate risk detected",
+        f"🧾 Risk Summary: {verdict['label']} confidence assessment",
+
         "",
         f"• {token.get('name','Unknown')} • ${token.get('symbol','UNKNOWN')} •",
         "🤖 ANON_AI_WATCHER • AI CODE CHECK",

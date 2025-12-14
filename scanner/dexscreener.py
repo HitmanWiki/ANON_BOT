@@ -33,6 +33,7 @@ def fetch_dex_data(ca: str):
         if not pairs:
             return None
 
+        # Pick deepest liquidity pair
         pair = max(
             pairs,
             key=lambda p: float(p.get("liquidity", {}).get("usd", 0))
@@ -42,6 +43,30 @@ def fetch_dex_data(ca: str):
         changes = pair.get("priceChange", {})
         vol = pair.get("volume", {})
         txns = pair.get("txns", {}).get("h24", {})
+
+        # -------- LP STATUS (AUTHORITATIVE) --------
+        lp_info = {
+            "burned": bool(pair.get("liquidity", {}).get("burned")),
+            "locked": bool(pair.get("liquidity", {}).get("locked")),
+        }
+
+        if lp_info["burned"]:
+            lp_status = "burned"
+        elif lp_info["locked"]:
+            lp_status = "locked"
+        else:
+            lp_status = "unknown"
+
+        # -------- SOCIALS + WEBSITE --------
+        socials = {
+            s.get("type"): s.get("url")
+            for s in pair.get("info", {}).get("socials", [])
+            if s.get("type") and s.get("url")
+        }
+
+        website = pair.get("info", {}).get("website")
+        if website:
+            socials["website"] = website
 
         result = {
             "price": price,
@@ -62,12 +87,13 @@ def fetch_dex_data(ca: str):
                 "h1": int(float(vol.get("h1", 0))),
             },
             "pair_created": pair.get("pairCreatedAt"),
-            "dexs": pair.get("url"),
-            "dext": pair.get("info", {}).get("dextools"),
-            "socials": {
-                s["type"]: s["url"]
-                for s in pair.get("info", {}).get("socials", [])
-            }
+            "pair_url": pair.get("url"),
+            "lp": {
+                "status": lp_status,      # burned | locked | unknown
+                "burned": lp_info["burned"],
+                "locked": lp_info["locked"],
+            },
+            "socials": socials,
         }
 
         _set_cache(ca, result)
@@ -77,17 +103,25 @@ def fetch_dex_data(ca: str):
         return None
 
 
+# -------- Helpers --------
+
 def volume_spike(vol: dict) -> bool:
+    """
+    True if 1h volume >= 35% of 24h volume
+    """
     try:
-        if vol["h24"] == 0:
+        if not vol or vol.get("h24", 0) == 0:
             return False
-        return vol["h1"] / vol["h24"] >= 0.35
+        return vol.get("h1", 0) / vol.get("h24", 1) >= 0.35
     except Exception:
         return False
 
 
 def recent_launch(pair_created_ms):
+    """
+    True if launched within last 24h
+    """
     if not pair_created_ms:
         return False
-    age_hours = (time.time() * 1000 - pair_created_ms) / 3600000
+    age_hours = (time.time() * 1000 - pair_created_ms) / 3_600_000
     return age_hours <= 24
