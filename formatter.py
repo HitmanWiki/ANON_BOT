@@ -2,8 +2,54 @@ import time
 from scanner.dexscreener import volume_spike, recent_launch
 
 
+# ───────── Helpers ─────────
 
-def format_report(t, verdict, market, lp_info, history=None):
+def verdict_bar(label: str) -> str:
+    label = (label or "NEUTRAL").upper()
+    if label == "GOOD":
+        return "🟩🟩🟩 #GOOD 🟩🟩🟩"
+    if label == "NEUTRAL":
+        return "🟩🟩🟥 #NEUTRAL 🟥🟥🟥"
+    if label == "RISKY":
+        return "🟧🟧🟥 #RISKY 🟥🟥🟥"
+    return "🟥🟥🟥 #BAD 🟥🟥🟥"
+
+
+def candle_color(pct: float) -> str:
+    if pct > 0:
+        return "🟢"
+    if pct < 0:
+        return "🔴"
+    return "🟡"
+
+
+def trend_bias(pc: dict) -> str:
+    score = 0
+    if pc.get("m5", 0) > 0:
+        score += 1
+    if pc.get("h1", 0) > 0:
+        score += 1
+    if pc.get("h24", 0) > 0:
+        score += 1
+
+    if score >= 2:
+        return "🟢 Bullish"
+    if score == 1:
+        return "🟡 Neutral"
+    return "🔴 Bearish"
+
+
+def vwap_ema_bias(pc: dict) -> str:
+    if pc.get("m5", 0) > 0 and pc.get("h1", 0) > 0:
+        return "🟢 Above VWAP / EMA (Bullish)"
+    if pc.get("h24", 0) < -25:
+        return "🔴 Extended / Below VWAP (Bearish)"
+    return "🟡 Near VWAP / EMA"
+
+
+# ───────── Main Formatter ─────────
+
+def format_report(token: dict, verdict: dict, market: dict, lp_info: dict, history=None) -> str:
     lines = []
 
     # ───────── Badges ─────────
@@ -18,27 +64,30 @@ def format_report(t, verdict, market, lp_info, history=None):
         lines.append(" ".join(badges))
         lines.append("")
 
-    # ───────── Header ─────────
+    # ───────── Header (DYNAMIC) ─────────
+    label = verdict.get("label", "NEUTRAL")
+    confidence = verdict.get("confidence", "Medium")
+
     lines.extend([
-        "🧾 Risk Summary: Low immediate risk detected",
+        f"🧾 Risk Summary: {confidence} immediate risk detected",
         "",
-        f"• {t.get('name','Unknown')} • ${t.get('symbol','UNKNOWN')} •",
+        f"• {token.get('name','Unknown')} • ${token.get('symbol','UNKNOWN')} •",
         "🤖 ANON_AI_WATCHER • AI CODE CHECK",
-        "└🟩🟩🟩 #GOOD 🟩🟩🟩",
+        f"└{verdict_bar(label)}",
         "",
     ])
 
     # ───────── Contract ─────────
-    if t.get("owner_renounced") is True:
+    if token.get("owner_renounced") is True:
         ownership = "🟢 Renounced"
-    elif t.get("owner_renounced") is None:
-        ownership = "🟡 Unknown"
-    else:
-        owner_addr = t.get("owner_address")
-        short = f"{owner_addr[:6]}…{owner_addr[-4:]}" if owner_addr else "EOA"
+    elif token.get("owner_renounced") is False:
+        owner = token.get("owner_address")
+        short = f"{owner[:6]}…{owner[-4:]}" if owner else "EOA"
         ownership = f"🔴 Not Renounced ({short})"
+    else:
+        ownership = "🟡 Unknown"
 
-    trading = "🟢 Enabled" if t.get("trading") else "🔴 Disabled"
+    trading = "🟢 Enabled" if token.get("trading") else "🔴 Disabled"
 
     lines.extend([
         "🛡️ Contract",
@@ -48,18 +97,20 @@ def format_report(t, verdict, market, lp_info, history=None):
     ])
 
     # ───────── Liquidity ─────────
-    if lp_info.get("status") == "burned":
+    lp_status = lp_info.get("status")
+
+    if lp_status == "burned":
         lines.extend([
             "🔥 Liquidity",
             "├ Status: 🟢 Burned",
-            "└ LP tokens permanently burned (verified by DexScreener)",
+            "└ LP tokens permanently burned (DexScreener verified)",
             "",
         ])
-    elif lp_info.get("status") == "locked":
-        unlock_ts = lp_info.get("unlock_ts")
+    elif lp_status == "locked":
         unlock = "Unlock time unknown"
-        if unlock_ts:
-            days = max(0, (unlock_ts - int(time.time())) // 86400)
+        ts = lp_info.get("unlock_ts")
+        if ts:
+            days = max(0, (ts - int(time.time())) // 86400)
             unlock = f"{days} days remaining"
 
         lines.extend([
@@ -75,13 +126,13 @@ def format_report(t, verdict, market, lp_info, history=None):
             "",
         ])
 
-    # ───────── Trade Simulation ─────────
-    if t.get("goplus"):
-        gp = t["goplus"]
+    # ───────── Trade Simulation (GoPlus) ─────────
+    goplus = token.get("goplus")
+    if goplus:
         lines.extend([
             "🧪 Trade Simulation",
             "🛡 Verified by GoPlus",
-            f"└ Taxes: Buy {gp.get('buy_tax','N/A')}% | Sell {gp.get('sell_tax','N/A')}%",
+            f"└ Taxes: Buy {goplus.get('buy_tax','N/A')}% | Sell {goplus.get('sell_tax','N/A')}%",
             "",
         ])
     else:
@@ -91,22 +142,24 @@ def format_report(t, verdict, market, lp_info, history=None):
             "",
         ])
 
-    # ───────── Confidence (Decay applied) ─────────
-    score = verdict.get("score", 100)
-    confidence = verdict.get("confidence", "High")
-
-    if market and market.get("vol", {}).get("h24", 0) < 10_000:
-        score -= 10
-        confidence = "Medium"
+    # ───────── Confidence & Score (FROM VERDICT) ─────────
+    score = verdict.get("score", 0)
 
     lines.extend([
         f"🟩🟩🟩  Confidence: {confidence}",
-        f"✨ Total Score: {max(score,0)}/100",
-        "🧠 Confidence adjusted using contract + liquidity + activity",
+        f"✨ Total Score: {score}/100",
+        "🧠 Confidence derived from contract risk, liquidity certainty & market activity",
         "",
     ])
 
-    # ───────── Market ─────────
+    reasons = verdict.get("reasons") or []
+    if reasons:
+        lines.append("🚨 Reasons:")
+        for r in reasons:
+            lines.append(f"• {r}")
+        lines.append("")
+
+    # ───────── Market (DexScreener) ─────────
     if market:
         pc = market.get("price_change", {})
 
@@ -124,18 +177,28 @@ def format_report(t, verdict, market, lp_info, history=None):
 
         lines.extend([
             "🕯️ Candle Summary",
-            f"├ 5m:  {'🟢' if pc.get('m5',0)>0 else '🔴' if pc.get('m5',0)<0 else '🟡'} {pc.get('m5',0)}%",
-            f"├ 1h:  {'🟢' if pc.get('h1',0)>0 else '🔴' if pc.get('h1',0)<0 else '🟡'} {pc.get('h1',0)}%",
-            f"└ 24h: {'🟢' if pc.get('h24',0)>0 else '🔴' if pc.get('h24',0)<0 else '🟡'} {pc.get('h24',0)}%",
+            f"├ 5m:  {candle_color(pc.get('m5',0))} {pc.get('m5',0)}%",
+            f"├ 1h:  {candle_color(pc.get('h1',0))} {pc.get('h1',0)}%",
+            f"└ 24h: {candle_color(pc.get('h24',0))} {pc.get('h24',0)}%",
+            "",
+            "🧠 Trend Bias",
+            f"└ {trend_bias(pc)}",
+            "",
+            "📐 VWAP / EMA (Inference)",
+            f"└ {vwap_ema_bias(pc)}",
             "",
         ])
 
-    # ───────── Socials ─────────
+    # ───────── Socials (INCLUDING WEBSITE) ─────────
     socials = market.get("socials", {}) if market else {}
     if socials:
         lines.append("👥 Socials")
-        for k, v in socials.items():
-            lines.append(f"└ {k.upper()}: {v}")
+        if socials.get("twitter"):
+            lines.append(f"└ TWITTER: {socials['twitter']}")
+        if socials.get("telegram"):
+            lines.append(f"└ TELEGRAM: {socials['telegram']}")
+        if socials.get("website"):
+            lines.append(f"└ WEBSITE: {socials['website']}")
         lines.append("")
 
     # ───────── Footer ─────────
