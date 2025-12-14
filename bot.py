@@ -1,72 +1,94 @@
-from telegram.ext import Application, MessageHandler, filters
+import asyncio
+from collections import defaultdict
+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ChatAction
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    CommandHandler,
+    ContextTypes,
+    filters,
+)
+
 from web3 import Web3
 
 from config import BOT_TOKEN
 from scanner.chain import detect_chain
 from scanner.token import get_token_info
 from scanner.trading import trading_enabled
-from scanner.honeypot import simulate_trade
-from scanner.honeypot_is import check_honeypot_is
-from scanner.dexscreener import fetch_dex_data, volume_spike
+from scanner.dexscreener import fetch_dex_data
 from scanner.liquidity import lp_analysis
 from scanner.goplus import fetch_goplus
 from scanner.verdict import verdict_engine
-from formatter import format_report
 from scanner.abi.uniswap_pair import UNISWAP_PAIR_ABI
-from telegram.constants import ChatAction
+from formatter import format_report
 
 
+# ───────── /start & /help ─────────
 
-TOKEN_STATE = {}
+START_TEXT = (
+    "Paste any EVM token contract address to get an instant on-chain scan."
+)
 
-async def scan(update: Update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_text(START_TEXT)
+    await asyncio.sleep(10)
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_text(START_TEXT)
+    await asyncio.sleep(10)
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+
+# ───────── Main Scanner ─────────
+
+async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     ca = msg.text.strip()
+
+    # Only process valid EVM addresses
     if not Web3.is_address(ca):
         return
 
-    # Show typing indicator
+    # Typing indicator
     await context.bot.send_chat_action(
         chat_id=msg.chat.id,
         action=ChatAction.TYPING
     )
 
-    await msg.reply_text(
+    status_msg = await msg.reply_text(
         "🔍 Scanning contract...",
         reply_to_message_id=msg.message_id
     )
 
-
+    # Detect chain
     chain, w3 = detect_chain(ca)
     if not chain:
-        await msg.reply_text("❌ Contract not found", reply_to_message_id=msg.message_id)
+        await status_msg.edit_text("❌ Contract not found on supported chains")
         return
 
     ca = Web3.to_checksum_address(ca)
-    bytecode = w3.eth.get_code(ca).hex()
 
+    # ───────── Data Gathering ─────────
     token = get_token_info(w3, ca)
     market = fetch_dex_data(ca)
     trading = trading_enabled(True, market)
-
-    trade_sim = simulate_trade(w3, chain, ca)
-    hp_is = check_honeypot_is(chain, ca)
-
-    # 🛡 GoPlus
     goplus = fetch_goplus(chain, ca)
 
-    
-
-    # ALWAYS initialize first
+    # ───────── Liquidity Analysis ─────────
     lp_info = {"status": "unknown"}
 
     if market:
         pair_address = market.get("pair_address")
-
         if pair_address:
-            from scanner.abi.uniswap_pair import UNISWAP_PAIR_ABI
-
             try:
                 pair = w3.eth.contract(
                     address=Web3.to_checksum_address(pair_address),
@@ -77,27 +99,29 @@ async def scan(update: Update, context):
             except Exception:
                 lp_info = {"status": "unknown"}
 
-
-
+    # ───────── Verdict ─────────
     data = {
         "name": token["name"],
         "symbol": token["symbol"],
         "owner": token["owner"],
         "trading": trading,
-        "sell_test": trade_sim.get("sell_test"),
-        "honeypot_is": hp_is,
         "goplus": goplus,
         "advanced_flags": [],
     }
 
     verdict = verdict_engine(data)
 
-    prev = TOKEN_STATE.get(ca)
-    history = {"prev_score": prev["score"]} if prev else None
-    TOKEN_STATE[ca] = {"score": verdict["score"]}
+    # ───────── Format Report ─────────
+    text = format_report(
+        data,
+        verdict,
+        market,
+        lp_info,
+        history=None,
+        caller_data=None
+    )
 
-    text = format_report(data, verdict, market, lp_info, history)
-
+    # ───────── Buttons ─────────
     buttons = []
     if market:
         row = []
@@ -108,13 +132,12 @@ async def scan(update: Update, context):
         if row:
             buttons.append(row)
 
-    sent = await msg.reply_text(
+    sent = await status_msg.edit_text(
         text,
-        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
-        reply_to_message_id=msg.message_id
+        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None
     )
 
-    # 📌 Pin the latest scan message
+    # 📌 Pin latest scan
     try:
         await context.bot.pin_chat_message(
             chat_id=sent.chat.id,
@@ -122,13 +145,23 @@ async def scan(update: Update, context):
             disable_notification=True
         )
     except Exception:
-        pass  # ignore if bot lacks pin permission
+        pass
 
+
+# ───────── App Bootstrap ─────────
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
+
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+
+    # Scanner (paste CA)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, scan))
+
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
