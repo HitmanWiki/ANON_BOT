@@ -79,20 +79,24 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trading = trading_enabled(True, market)
     goplus = fetch_goplus(chain, ca)
 
-    # ───────── LP INFO (FINAL & CORRECT) ─────────
+    # ───────── LP INFO (FINAL & AUTHORITATIVE) ─────────
+
     lp_info = {"status": "unknown"}
 
     pair_address = market.get("pair_address") if market else None
 
-    # 1️⃣ DexScreener explicit LP status (rare)
+    # 1️⃣ DexScreener hint (NON-AUTHORITATIVE)
+    # Use ONLY if explicitly burned / locked
     if market and isinstance(market.get("lp"), dict):
         ds_lp = market["lp"]
+
         if ds_lp.get("status") == "burned":
             lp_info = {
                 "status": "burned",
                 "burned_pct": ds_lp.get("burnedPct"),
                 "source": "dexscreener",
             }
+
         elif ds_lp.get("status") == "locked":
             lp_info = {
                 "status": "locked",
@@ -101,9 +105,23 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "source": "dexscreener",
             }
 
-    # 2️⃣ On-chain LP burn verification (MAIN PATH)
-    if lp_info["status"] == "unknown" and pair_address:
-        lp_info = lp_analysis(w3, pair_address)
+    # 2️⃣ ON-CHAIN LP VERIFICATION (AUTHORITATIVE)
+    # Always override if burn detected
+    if pair_address:
+        try:
+            onchain_lp = lp_analysis(w3, pair_address)
+
+            # Burned LP ALWAYS wins
+            if onchain_lp.get("status") == "burned":
+                lp_info = onchain_lp
+
+            # Locked LP overrides unknown
+            elif lp_info["status"] == "unknown" and onchain_lp.get("status") == "locked":
+                lp_info = onchain_lp
+
+        except Exception:
+            pass
+
 
     # ───────── Data for verdict / formatter ─────────
     data = {

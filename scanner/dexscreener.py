@@ -57,30 +57,38 @@ def fetch_dex_data(ca: str):
                 socials["website"] = w["url"]
 
         result = {
-            "price": price,
-            "price_change": {
-                "m5": float(changes.get("m5", 0)),
-                "h1": float(changes.get("h1", 0)),
-                "h24": float(changes.get("h24", 0)),
-            },
-            "mc": int(float(pair.get("fdv", 0))),
-            "liq": int(liq_usd),
-            "txns": {
-                "buys": int(txns.get("buys", 0)),
-                "sells": int(txns.get("sells", 0)),
-            },
-            "vol": {
-                "h24": int(float(vol.get("h24", 0))),
-                "h6": int(float(vol.get("h6", 0))),
-                "h1": int(float(vol.get("h1", 0))),
-            },
-            "pair_created": pair.get("pairCreatedAt"),
-            "pair_url": pair.get("url"),
-            "lp": {
-                "status": "present" if liq_usd > 0 else "unknown",
-            },
-            "socials": socials,
-        }
+        "price": price,
+        "price_change": {
+            "m5": float(changes.get("m5", 0)),
+            "h1": float(changes.get("h1", 0)),
+            "h24": float(changes.get("h24", 0)),
+        },
+        "mc": int(float(pair.get("fdv", 0))),
+        "liq": int(float(pair.get("liquidity", {}).get("usd", 0))),
+        "txns": {
+            "buys": int(txns.get("buys", 0)),
+            "sells": int(txns.get("sells", 0)),
+        },
+        "vol": {
+            "h24": int(float(vol.get("h24", 0))),
+            "h6": int(float(vol.get("h6", 0))),
+            "h1": int(float(vol.get("h1", 0))),
+        },
+
+        # 🔥 REQUIRED FOR LP ANALYSIS
+        "pair_address": pair.get("pairAddress"),
+        "chain_id": pair.get("chainId"),
+
+        "pair_created": pair.get("pairCreatedAt"),
+        "dexs": pair.get("url"),
+        "dext": pair.get("info", {}).get("dextools"),
+
+        "socials": {
+            s["type"]: s["url"]
+            for s in pair.get("info", {}).get("socials", [])
+        },
+    }
+
 
         _set_cache(ca, result)
         return result
