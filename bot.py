@@ -110,7 +110,8 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
 
-    verdict = verdict_engine(data)
+    verdict = verdict_engine(data, lp_info)
+
 
     text = format_report(
         data,
