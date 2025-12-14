@@ -79,27 +79,23 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trading = trading_enabled(True, market)
     goplus = fetch_goplus(chain, ca)
 
-    # ───── Liquidity (DexScreener first) ─────
     lp_info = {"status": "unknown"}
 
-    if market and market.get("lp_burned") is True:
-        lp_info = {
-            "status": "burned",
-            "source": "dexscreener"
-        }
-    else:
-        if market:
-            pair_address = market.get("pair_address")
-            if pair_address:
-                try:
-                    pair = w3.eth.contract(
-                        address=Web3.to_checksum_address(pair_address),
-                        abi=UNISWAP_PAIR_ABI
-                    )
-                    total_supply = pair.functions.totalSupply().call()
-                    lp_info = lp_analysis(w3, chain, pair, total_supply)
-                except Exception:
-                    lp_info = {"status": "unknown"}
+    if market and market.get("lp"):
+        lp = market["lp"]
+
+        if lp.get("burned"):
+            lp_info = {
+                "status": "burned",
+                "source": "dexscreener",
+            }
+        elif lp.get("locked"):
+            lp_info = {
+                "status": "locked",
+                "locker": "DexScreener",
+            }
+
+
 
     data = {
         "name": token.get("name", "Unknown"),

@@ -58,15 +58,18 @@ def fetch_dex_data(ca: str):
             lp_status = "unknown"
 
         # -------- SOCIALS + WEBSITE --------
-        socials = {
-            s.get("type"): s.get("url")
-            for s in pair.get("info", {}).get("socials", [])
-            if s.get("type") and s.get("url")
-        }
+        socials = {}
+
+        for s in pair.get("info", {}).get("socials", []):
+            t = s.get("type", "").lower()
+            u = s.get("url")
+            if t and u:
+                socials[t] = u
 
         website = pair.get("info", {}).get("website")
         if website:
             socials["website"] = website
+
 
         result = {
             "price": price,
