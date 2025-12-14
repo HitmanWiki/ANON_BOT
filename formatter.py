@@ -24,12 +24,17 @@ def format_report(t, verdict, market, lp_info, history):
     ])
 
     # ───────── Contract ─────────
+    ownership = "🟢 Renounced" if t.get("owner_renounced") else "🔴 Not Renounced"
+    trading = "🟢 Enabled" if t.get("trading") else "🔴 Disabled"
+
     lines.extend([
-        "",
         "🛡️ Contract",
-        f"├ Ownership: {'🟢 Renounced' if t['owner']=='RENOUNCED' else '🔴 Not Renounced'}",
-        f"├ Trading: {'🟢 Enabled' if t['trading'] else '🔴 Disabled'}",
+        f"├ Ownership: {ownership}",
+        f"├ Trading: {trading}",
+        ""
     ])
+
+
 
     # ───────── Liquidity ─────────
     lines.append("")
