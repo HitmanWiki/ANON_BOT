@@ -79,21 +79,23 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trading = trading_enabled(True, market)
     goplus = fetch_goplus(chain, ca)
 
+    # LP INFO (AUTHORITATIVE FROM DEXSCREENER)
     lp_info = {"status": "unknown"}
 
     if market and market.get("lp"):
-        lp = market["lp"]
+        lp_status = market["lp"].get("status")
 
-        if lp.get("burned"):
+        if lp_status == "burned":
             lp_info = {
                 "status": "burned",
                 "source": "dexscreener",
             }
-        elif lp.get("locked"):
+        elif lp_status == "locked":
             lp_info = {
                 "status": "locked",
                 "locker": "DexScreener",
             }
+
 
 
 

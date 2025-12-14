@@ -71,6 +71,7 @@ def fetch_dex_data(ca: str):
             socials["website"] = website
 
 
+
         result = {
             "price": price,
             "price_change": {
