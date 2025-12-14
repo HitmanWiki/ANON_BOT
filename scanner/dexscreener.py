@@ -33,7 +33,6 @@ def fetch_dex_data(ca: str):
         if not pairs:
             return None
 
-        # Pick deepest liquidity pair
         pair = max(
             pairs,
             key=lambda p: float(p.get("liquidity", {}).get("usd", 0))
@@ -44,33 +43,18 @@ def fetch_dex_data(ca: str):
         vol = pair.get("volume", {})
         txns = pair.get("txns", {}).get("h24", {})
 
-        # -------- LP STATUS (AUTHORITATIVE) --------
-        lp_info = {
-            "burned": bool(pair.get("liquidity", {}).get("burned")),
-            "locked": bool(pair.get("liquidity", {}).get("locked")),
-        }
+        liq_usd = float(pair.get("liquidity", {}).get("usd", 0))
 
-        if lp_info["burned"]:
-            lp_status = "burned"
-        elif lp_info["locked"]:
-            lp_status = "locked"
-        else:
-            lp_status = "unknown"
-
-        # -------- SOCIALS + WEBSITE --------
         socials = {}
+        info = pair.get("info", {})
 
-        for s in pair.get("info", {}).get("socials", []):
-            t = s.get("type", "").lower()
-            u = s.get("url")
-            if t and u:
-                socials[t] = u
+        for s in info.get("socials", []):
+            if s.get("type") and s.get("url"):
+                socials[s["type"].lower()] = s["url"]
 
-        website = pair.get("info", {}).get("website")
-        if website:
-            socials["website"] = website
-
-
+        for w in info.get("websites", []):
+            if w.get("url"):
+                socials["website"] = w["url"]
 
         result = {
             "price": price,
@@ -80,7 +64,7 @@ def fetch_dex_data(ca: str):
                 "h24": float(changes.get("h24", 0)),
             },
             "mc": int(float(pair.get("fdv", 0))),
-            "liq": int(float(pair.get("liquidity", {}).get("usd", 0))),
+            "liq": int(liq_usd),
             "txns": {
                 "buys": int(txns.get("buys", 0)),
                 "sells": int(txns.get("sells", 0)),
@@ -93,9 +77,7 @@ def fetch_dex_data(ca: str):
             "pair_created": pair.get("pairCreatedAt"),
             "pair_url": pair.get("url"),
             "lp": {
-                "status": lp_status,      # burned | locked | unknown
-                "burned": lp_info["burned"],
-                "locked": lp_info["locked"],
+                "status": "present" if liq_usd > 0 else "unknown",
             },
             "socials": socials,
         }

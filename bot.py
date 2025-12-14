@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ChatAction
@@ -20,7 +21,6 @@ from scanner.dexscreener import fetch_dex_data
 from scanner.liquidity import lp_analysis
 from scanner.goplus import fetch_goplus
 from scanner.verdict import verdict_engine
-from scanner.abi.uniswap_pair import UNISWAP_PAIR_ABI
 from formatter import format_report
 
 
@@ -73,43 +73,55 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ca = Web3.to_checksum_address(ca)
 
-    # ───── Data ─────
+    # ───────── Core data ─────────
     token = get_token_info(w3, ca)
     market = fetch_dex_data(ca)
     trading = trading_enabled(True, market)
     goplus = fetch_goplus(chain, ca)
 
-    # LP INFO (AUTHORITATIVE FROM DEXSCREENER)
+    # ───────── LP INFO (PRIORITY ORDER) ─────────
+    # 1️⃣ DexScreener (authoritative)
+    # 2️⃣ On-chain burn % fallback
+    # 3️⃣ Known lockers (UNCX / TeamFinance)
+
     lp_info = {"status": "unknown"}
 
     if market and market.get("lp"):
-        lp_status = market["lp"].get("status")
-
-        if lp_status == "burned":
+        ds_lp = market["lp"]
+        if ds_lp.get("status") == "burned":
             lp_info = {
                 "status": "burned",
+                "burned_pct": ds_lp.get("burnedPct"),
                 "source": "dexscreener",
             }
-        elif lp_status == "locked":
+        elif ds_lp.get("status") == "locked":
             lp_info = {
                 "status": "locked",
-                "locker": "DexScreener",
+                "locker": ds_lp.get("locker", "DexScreener"),
+                "unlock_ts": ds_lp.get("unlockTs"),
             }
 
+    # 2️⃣ On-chain LP verification (only if still unknown)
+    if lp_info["status"] == "unknown" and market:
+        try:
+            pair_addr = market.get("pair_address")
+            if pair_addr:
+                lp_info = lp_analysis(w3, pair_addr)
+        except Exception:
+            pass
 
-
-
+    # ───────── Data for verdict / formatter ─────────
     data = {
         "name": token.get("name", "Unknown"),
         "symbol": token.get("symbol", "UNKNOWN"),
-        "owner_renounced": token.get("owner_renounced", False),
+        "owner_renounced": token.get("owner_renounced"),
+        "owner_address": token.get("owner"),
         "trading": trading,
         "goplus": goplus,
+        "pair_created": market.get("pair_created") if market else None,
     }
 
-
     verdict = verdict_engine(data, lp_info)
-
 
     text = format_report(
         data,
@@ -119,7 +131,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         history=None
     )
 
-    # ───── Buttons ─────
+    # ───────── Buttons ─────────
     buttons = []
     if market:
         row = []
@@ -132,7 +144,8 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sent = await status_msg.edit_text(
         text,
-        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None
+        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+        disable_web_page_preview=True
     )
 
     # 📌 Pin latest scan

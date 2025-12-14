@@ -98,34 +98,40 @@ def format_report(token: dict, verdict: dict, market: dict, lp_info: dict, histo
     ])
 
     # ───────── Liquidity ─────────
-    lp_status = lp_info.get("status")
+    def format_lp(lp):
+        if lp["status"] == "burned":
+            return [
+                "🔥 Liquidity",
+                f"└ Burned: {lp['burned_pct']}%",
+                ""
+            ]
 
-    if lp_status == "burned":
-        lines.extend([
-            "🔥 Liquidity",
-            "├ Status: 🟢 Burned",
-            "└ LP tokens permanently burned (DexScreener verified)",
-            "",
-        ])
-    elif lp_status == "locked":
-        unlock = "Unlock time unknown"
-        ts = lp_info.get("unlock_ts")
-        if ts:
-            days = max(0, (ts - int(time.time())) // 86400)
-            unlock = f"{days} days remaining"
+        if lp["status"] == "locked":
+            unlock = "Unknown"
+            if lp.get("unlock_ts"):
+                days = max(0, (lp["unlock_ts"] - int(time.time())) // 86400)
+                unlock = f"{days} days remaining"
 
-        lines.extend([
-            "🔒 Liquidity",
-            f"├ Status: 🟢 Locked ({lp_info.get('locker','Unknown')})",
-            f"└ Unlock: {unlock}",
-            "",
-        ])
-    else:
-        lines.extend([
+            return [
+                "🔒 Liquidity",
+                f"├ Locker: {lp.get('locker','Unknown')}",
+                f"└ Unlock: {unlock}",
+                ""
+            ]
+
+        if lp["status"] == "present":
+            return [
+                "💧 Liquidity",
+                "└ Status: 🟢 Present",
+                ""
+            ]
+
+        return [
             "⚠️ Liquidity",
-            "└ Status: 🟡 Lock status unknown",
-            "",
-        ])
+            "└ Status: 🟡 Unable to verify",
+            ""
+        ]
+
 
     # ───────── Trade Simulation (GoPlus) ─────────
     goplus = token.get("goplus")
