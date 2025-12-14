@@ -48,13 +48,18 @@ def fetch_dex_data(ca: str):
         socials = {}
         info = pair.get("info", {})
 
-        for s in info.get("socials", []):
-            if s.get("type") and s.get("url"):
-                socials[s["type"].lower()] = s["url"]
+        socials = {
+            s["type"]: s["url"]
+            for s in info.get("socials", [])
+        }
 
-        for w in info.get("websites", []):
-            if w.get("url"):
-                socials["website"] = w["url"]
+        # Add websites
+        websites = info.get("websites", [])
+        if websites:
+            socials["website"] = websites[0].get("url")
+
+        
+
 
         result = {
         "price": price,
