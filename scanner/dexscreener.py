@@ -12,7 +12,7 @@ def fetch_dex_data(ca: str):
         if not pairs:
             return None
 
-        # Pick the pair with highest USD liquidity
+        # Choose highest liquidity pair
         pair = max(
             pairs,
             key=lambda p: float(p.get("liquidity", {}).get("usd", 0))
@@ -23,16 +23,23 @@ def fetch_dex_data(ca: str):
         volume = pair.get("volume", {}) or {}
         txns_24h = pair.get("txns", {}).get("h24", {}) or {}
 
-        # ───── Socials & Website extraction ─────
-        info = pair.get("info", {}) or {}
+        # ───── LP burned detection (DexScreener) ─────
+        lp_burned = False
+        liquidity = pair.get("liquidity", {})
+        if isinstance(liquidity, dict):
+            lp_burned = liquidity.get("lpBurned", False)
 
+        info = pair.get("info", {}) or {}
+        if info.get("lpBurned") is True:
+            lp_burned = True
+
+        # ───── Socials + Website ─────
         socials = {
             s.get("type"): s.get("url")
             for s in info.get("socials", [])
             if s.get("url")
         }
 
-        # Website can appear in multiple places
         if info.get("website"):
             socials["website"] = info.get("website")
 
@@ -42,7 +49,6 @@ def fetch_dex_data(ca: str):
                 socials["website"] = websites[0].get("url")
 
         return {
-            # ───── Market core ─────
             "price": price,
             "price_change": {
                 "m5": float(changes.get("m5", 0)),
@@ -60,17 +66,12 @@ def fetch_dex_data(ca: str):
                 "h6": int(float(volume.get("h6", 0))),
                 "h1": int(float(volume.get("h1", 0))),
             },
-
-            # ───── LP / Pair info (CRITICAL) ─────
             "pair_address": pair.get("pairAddress"),
             "pair_created": pair.get("pairCreatedAt"),
-            "dex_id": pair.get("dexId"),
-            "chain_id": pair.get("chainId"),
-
-            # ───── External links ─────
             "dexs": pair.get("url"),
             "dext": info.get("dextools"),
             "socials": socials,
+            "lp_burned": lp_burned,
         }
 
     except Exception:

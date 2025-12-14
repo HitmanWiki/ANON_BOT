@@ -1,5 +1,4 @@
 import asyncio
-from collections import defaultdict
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ChatAction
@@ -25,11 +24,10 @@ from scanner.abi.uniswap_pair import UNISWAP_PAIR_ABI
 from formatter import format_report
 
 
-# ───────── /start & /help ─────────
+START_TEXT = "Paste any EVM token contract address to get an instant on-chain scan."
 
-START_TEXT = (
-    "Paste any EVM token contract address to get an instant on-chain scan."
-)
+
+# ───────── Commands ─────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(START_TEXT)
@@ -38,6 +36,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.delete()
     except Exception:
         pass
+
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(START_TEXT)
@@ -48,17 +47,15 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
-# ───────── Main Scanner ─────────
+# ───────── Scanner ─────────
 
 async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     ca = msg.text.strip()
 
-    # Only process valid EVM addresses
     if not Web3.is_address(ca):
         return
 
-    # Typing indicator
     await context.bot.send_chat_action(
         chat_id=msg.chat.id,
         action=ChatAction.TYPING
@@ -69,7 +66,6 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_to_message_id=msg.message_id
     )
 
-    # Detect chain
     chain, w3 = detect_chain(ca)
     if not chain:
         await status_msg.edit_text("❌ Contract not found on supported chains")
@@ -77,51 +73,53 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ca = Web3.to_checksum_address(ca)
 
-    # ───────── Data Gathering ─────────
+    # ───── Data ─────
     token = get_token_info(w3, ca)
     market = fetch_dex_data(ca)
     trading = trading_enabled(True, market)
     goplus = fetch_goplus(chain, ca)
 
-    # ───────── Liquidity Analysis ─────────
+    # ───── Liquidity (DexScreener first) ─────
     lp_info = {"status": "unknown"}
 
-    if market:
-        pair_address = market.get("pair_address")
-        if pair_address:
-            try:
-                pair = w3.eth.contract(
-                    address=Web3.to_checksum_address(pair_address),
-                    abi=UNISWAP_PAIR_ABI
-                )
-                total_supply = pair.functions.totalSupply().call()
-                lp_info = lp_analysis(w3, pair, total_supply)
-            except Exception:
-                lp_info = {"status": "unknown"}
+    if market and market.get("lp_burned") is True:
+        lp_info = {
+            "status": "burned",
+            "source": "dexscreener"
+        }
+    else:
+        if market:
+            pair_address = market.get("pair_address")
+            if pair_address:
+                try:
+                    pair = w3.eth.contract(
+                        address=Web3.to_checksum_address(pair_address),
+                        abi=UNISWAP_PAIR_ABI
+                    )
+                    total_supply = pair.functions.totalSupply().call()
+                    lp_info = lp_analysis(w3, chain, pair, total_supply)
+                except Exception:
+                    lp_info = {"status": "unknown"}
 
-    # ───────── Verdict ─────────
     data = {
         "name": token["name"],
         "symbol": token["symbol"],
-        "owner": token["owner"],
+        "owner_renounced": token["owner_renounced"],
         "trading": trading,
         "goplus": goplus,
-        "advanced_flags": [],
     }
 
     verdict = verdict_engine(data)
 
-    # ───────── Format Report ─────────
     text = format_report(
         data,
         verdict,
         market,
         lp_info,
-        history=None,
-        
+        history=None
     )
 
-    # ───────── Buttons ─────────
+    # ───── Buttons ─────
     buttons = []
     if market:
         row = []
@@ -148,16 +146,13 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
-# ───────── App Bootstrap ─────────
+# ───────── App ─────────
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-
-    # Scanner (paste CA)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, scan))
 
     app.run_polling()
