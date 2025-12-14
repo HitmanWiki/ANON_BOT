@@ -19,6 +19,7 @@ from scanner.token import get_token_info
 from scanner.trading import trading_enabled
 from scanner.dexscreener import fetch_dex_data
 from scanner.liquidity import lp_analysis
+
 from scanner.goplus import fetch_goplus
 from scanner.verdict import verdict_engine
 from formatter import format_report
