@@ -1,8 +1,22 @@
 import time
+from scanner.dexscreener import volume_spike, recent_launch
+
 
 
 def format_report(t, verdict, market, lp_info, history=None):
     lines = []
+
+    # ───────── Badges ─────────
+    badges = []
+    if market:
+        if volume_spike(market.get("vol", {})):
+            badges.append("🔔 Unusual Volume Spike")
+        if recent_launch(market.get("pair_created")):
+            badges.append("🆕 Recently Launched")
+
+    if badges:
+        lines.append(" ".join(badges))
+        lines.append("")
 
     # ───────── Header ─────────
     lines.extend([
@@ -33,7 +47,7 @@ def format_report(t, verdict, market, lp_info, history=None):
         "",
     ])
 
-    # ───────── Liquidity (Authoritative) ─────────
+    # ───────── Liquidity ─────────
     if lp_info.get("status") == "burned":
         lines.extend([
             "🔥 Liquidity",
@@ -43,17 +57,15 @@ def format_report(t, verdict, market, lp_info, history=None):
         ])
     elif lp_info.get("status") == "locked":
         unlock_ts = lp_info.get("unlock_ts")
+        unlock = "Unlock time unknown"
         if unlock_ts:
-            remaining = unlock_ts - int(time.time())
-            days = max(0, remaining // 86400)
-            unlock_str = f"{days} days remaining"
-        else:
-            unlock_str = "Unlock time unknown"
+            days = max(0, (unlock_ts - int(time.time())) // 86400)
+            unlock = f"{days} days remaining"
 
         lines.extend([
             "🔒 Liquidity",
             f"├ Status: 🟢 Locked ({lp_info.get('locker','Unknown')})",
-            f"└ Unlock: {unlock_str}",
+            f"└ Unlock: {unlock}",
             "",
         ])
     else:
@@ -79,53 +91,25 @@ def format_report(t, verdict, market, lp_info, history=None):
             "",
         ])
 
-    # ───────── Confidence Logic (Explained) ─────────
-    score = 100
-    reasons = []
+    # ───────── Confidence (Decay applied) ─────────
+    score = verdict.get("score", 100)
+    confidence = verdict.get("confidence", "High")
 
-    if t.get("owner_renounced") is False:
-        score -= 15
-        reasons.append("Owner not renounced")
-
-    if lp_info.get("status") == "unknown":
+    if market and market.get("vol", {}).get("h24", 0) < 10_000:
         score -= 10
-        reasons.append("Liquidity lock could not be verified")
-
-    if not t.get("trading"):
-        score -= 25
-        reasons.append("Trading disabled")
-
-    if score >= 85:
-        confidence = "High"
-    elif score >= 65:
         confidence = "Medium"
-    else:
-        confidence = "Low"
 
     lines.extend([
         f"🟩🟩🟩  Confidence: {confidence}",
-        f"✨ Total Score: {score}/100",
-        "🧠 Confidence based on ownership, liquidity, taxes & market behavior",
-        "",
-    ])
-
-    if reasons:
-        lines.append("🚨 Reasons:")
-        for r in reasons:
-            lines.append(f"• {r}")
-        lines.append("")
-
-    # ───────── Advanced Risk Analysis (Heuristic) ─────────
-    lines.extend([
-        "🧠 Advanced Risk Analysis",
-        "└ 🟢 Distributed early buyers (inferred)",
-        "└ 🟢 No common rug-pattern bytecode similarity (heuristic)",
-        "└ 🟢 Liquidity behavior appears stable",
+        f"✨ Total Score: {max(score,0)}/100",
+        "🧠 Confidence adjusted using contract + liquidity + activity",
         "",
     ])
 
     # ───────── Market ─────────
     if market:
+        pc = market.get("price_change", {})
+
         lines.extend([
             "📈 Market",
             f"├ Price: ${market.get('price',0):,.8f}",
@@ -138,8 +122,6 @@ def format_report(t, verdict, market, lp_info, history=None):
             "",
         ])
 
-        # ───────── Candle Summary ─────────
-        pc = market.get("price_change", {})
         lines.extend([
             "🕯️ Candle Summary",
             f"├ 5m:  {'🟢' if pc.get('m5',0)>0 else '🔴' if pc.get('m5',0)<0 else '🟡'} {pc.get('m5',0)}%",
@@ -148,42 +130,13 @@ def format_report(t, verdict, market, lp_info, history=None):
             "",
         ])
 
-        # ───────── Trend Bias ─────────
-        score_trend = sum(1 for x in pc.values() if x > 0)
-        if score_trend >= 2:
-            trend = "🟢 Bullish"
-        elif score_trend == 1:
-            trend = "🟡 Neutral"
-        else:
-            trend = "🔴 Bearish"
-
-        lines.extend([
-            "🧠 Trend Bias",
-            f"└ {trend}",
-            "",
-        ])
-
-        # ───────── VWAP / EMA (Inference) ─────────
-        if pc.get("h24", 0) > 50:
-            ema_bias = "🔴 Extended / Below VWAP (Bearish)"
-        elif pc.get("m5", 0) > 0 and pc.get("h1", 0) > 0:
-            ema_bias = "🟢 Above VWAP / EMA (Bullish)"
-        else:
-            ema_bias = "🟡 Near VWAP / EMA"
-
-        lines.extend([
-            "📐 VWAP / EMA (Inference)",
-            f"└ {ema_bias}",
-            "",
-        ])
-
-        # ───────── Socials ─────────
-        socials = market.get("socials", {})
-        if socials:
-            lines.append("👥 Socials")
-            for k, v in socials.items():
-                lines.append(f"└ {k.upper()}: {v}")
-            lines.append("")
+    # ───────── Socials ─────────
+    socials = market.get("socials", {}) if market else {}
+    if socials:
+        lines.append("👥 Socials")
+        for k, v in socials.items():
+            lines.append(f"└ {k.upper()}: {v}")
+        lines.append("")
 
     # ───────── Footer ─────────
     lines.extend([

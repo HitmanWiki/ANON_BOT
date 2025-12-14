@@ -1,65 +1,93 @@
-def verdict_engine(t):
+def verdict_engine(t, lp_info):
     score = 100
     reasons = []
 
-    # Core contract checks
-    if not t.get("trading"):
-        score -= 20
-        reasons.append("Trading disabled")
-
-    if t.get("owner") != "RENOUNCED":
-        score -= 10
-        reasons.append("Owner not renounced")
-
-    # GoPlus security checks
     gp = t.get("goplus")
-    if gp:
-        if gp.get("honeypot"):
-            score -= 40
-            reasons.append("GoPlus: Honeypot detected")
+    if not gp:
+        return {
+            "label": "NEUTRAL",
+            "score": 60,
+            "confidence": "Medium",
+            "reasons": ["GoPlus data unavailable"],
+        }
 
-        if gp.get("blacklisted"):
-            score -= 25
-            reasons.append("GoPlus: Blacklist detected")
+    # 🚨 HARD FAILS
+    if gp["honeypot"] or gp["cannot_sell"] or gp["cannot_buy"] or gp["blacklist"]:
+        return {
+            "label": "BAD",
+            "score": 0,
+            "confidence": "Low",
+            "reasons": ["Critical GoPlus security flag detected"],
+        }
 
-        if gp.get("mintable"):
-            score -= 10
-            reasons.append("GoPlus: Mint function enabled")
+    # ⚠️ HIGH RISK
+    if gp["take_back_ownership"]:
+        score -= 20
+        reasons.append("Ownership reclaimable")
+    if gp["hidden_owner"]:
+        score -= 20
+        reasons.append("Hidden owner detected")
+    if gp["selfdestruct"]:
+        score -= 25
+        reasons.append("Self-destruct function present")
+    if gp["mintable"]:
+        score -= 15
+        reasons.append("Minting enabled")
+    if gp["proxy"]:
+        score -= 10
+        reasons.append("Proxy contract")
 
-        # ✅ Clean boost
-        if (
-            not gp.get("honeypot")
-            and not gp.get("blacklisted")
-            and gp.get("buy_tax", 100) <= 5
-            and gp.get("sell_tax", 100) <= 5
-        ):
-            score += 10
+    # 💸 TAXES
+    max_tax = max(gp["buy_tax"], gp["sell_tax"])
+    if max_tax > 20:
+        score -= 25
+        reasons.append("Very high taxes")
+    elif max_tax > 10:
+        score -= 15
+        reasons.append("High taxes")
+    elif max_tax > 5:
+        score -= 5
+        reasons.append("Moderate taxes")
 
-    # Clamp score
-    score = max(0, min(100, score))
+    if gp["transfer_tax"] > 0:
+        score -= 5
+        reasons.append("Transfer tax applied")
 
-    # Verdict tiers
-    if score >= 75:
-        verdict = "🟩🟩🟩 #GOOD 🟩🟩🟩"
-        confidence = "High"
-        risk_bar = "🟩🟩🟩"
-        summary = "Low immediate risk detected"
-    elif score >= 50:
-        verdict = "🟡🟡🟡 #NEUTRAL 🟡🟡🟡"
-        confidence = "Medium"
-        risk_bar = "🟩🟩🟥"
-        summary = "Moderate risk detected"
+    # 🧩 MEDIUM
+    if not gp["open_source"]:
+        score -= 5
+        reasons.append("Contract not open source")
+    if gp["slippage_modifiable"]:
+        score -= 10
+        reasons.append("Slippage modifiable")
+    if gp["personal_slippage_modifiable"]:
+        score -= 5
+        reasons.append("Per-user slippage control")
+    if gp["anti_whale"]:
+        score -= 3
+    if gp["anti_bot"]:
+        score -= 3
+    if gp["cooldown"]:
+        score -= 3
+
+    # 🟡 LP uncertainty
+    if lp_info["status"] == "unknown":
+        score -= 10
+        reasons.append("Liquidity lock unverifiable")
+
+    # FINAL LABEL
+    if score >= 85:
+        label, conf = "GOOD", "High"
+    elif score >= 65:
+        label, conf = "NEUTRAL", "Medium"
+    elif score >= 40:
+        label, conf = "RISKY", "Low"
     else:
-        verdict = "🟥🟥🟥 #RISKY 🟥🟥🟥"
-        confidence = "Low"
-        risk_bar = "🟥🟥🟥"
-        summary = "High risk detected"
+        label, conf = "BAD", "Low"
 
     return {
-        "score": score,
-        "verdict": verdict,
-        "confidence": confidence,
-        "risk_bar": risk_bar,
-        "summary": summary,
+        "label": label,
+        "score": max(score, 0),
+        "confidence": conf,
         "reasons": reasons,
     }

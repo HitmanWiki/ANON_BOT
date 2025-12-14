@@ -1,54 +1,49 @@
 import requests
+import time
 
-URL = "https://api.dexscreener.com/latest/dex/tokens/{}"
+DEX_URL = "https://api.dexscreener.com/latest/dex/tokens/{}"
+
+_CACHE = {}
+CACHE_TTL = 30  # seconds
+
+
+def _get_cache(key):
+    v = _CACHE.get(key)
+    if not v:
+        return None
+    data, ts = v
+    if time.time() - ts > CACHE_TTL:
+        del _CACHE[key]
+        return None
+    return data
+
+
+def _set_cache(key, data):
+    _CACHE[key] = (data, time.time())
 
 
 def fetch_dex_data(ca: str):
-    try:
-        r = requests.get(URL.format(ca), timeout=8)
-        data = r.json()
+    cached = _get_cache(ca)
+    if cached:
+        return cached
 
-        pairs = data.get("pairs")
+    try:
+        r = requests.get(DEX_URL.format(ca), timeout=8).json()
+        pairs = r.get("pairs")
         if not pairs:
             return None
 
-        # Choose highest liquidity pair
         pair = max(
             pairs,
             key=lambda p: float(p.get("liquidity", {}).get("usd", 0))
         )
 
         price = float(pair.get("priceUsd", 0))
-        changes = pair.get("priceChange", {}) or {}
-        volume = pair.get("volume", {}) or {}
-        txns_24h = pair.get("txns", {}).get("h24", {}) or {}
+        changes = pair.get("priceChange", {})
+        vol = pair.get("volume", {})
+        txns = pair.get("txns", {}).get("h24", {})
 
-        # ───── LP burned detection (DexScreener) ─────
-        lp_burned = False
-        liquidity = pair.get("liquidity", {})
-        if isinstance(liquidity, dict):
-            lp_burned = liquidity.get("lpBurned", False)
-
-        info = pair.get("info", {}) or {}
-        if info.get("lpBurned") is True:
-            lp_burned = True
-
-        # ───── Socials + Website ─────
-        socials = {
-            s.get("type"): s.get("url")
-            for s in info.get("socials", [])
-            if s.get("url")
-        }
-
-        if info.get("website"):
-            socials["website"] = info.get("website")
-
-        if not socials.get("website"):
-            websites = info.get("websites", [])
-            if isinstance(websites, list) and websites:
-                socials["website"] = websites[0].get("url")
-
-        return {
+        result = {
             "price": price,
             "price_change": {
                 "m5": float(changes.get("m5", 0)),
@@ -58,83 +53,41 @@ def fetch_dex_data(ca: str):
             "mc": int(float(pair.get("fdv", 0))),
             "liq": int(float(pair.get("liquidity", {}).get("usd", 0))),
             "txns": {
-                "buys": int(txns_24h.get("buys", 0)),
-                "sells": int(txns_24h.get("sells", 0)),
+                "buys": int(txns.get("buys", 0)),
+                "sells": int(txns.get("sells", 0)),
             },
             "vol": {
-                "h24": int(float(volume.get("h24", 0))),
-                "h6": int(float(volume.get("h6", 0))),
-                "h1": int(float(volume.get("h1", 0))),
+                "h24": int(float(vol.get("h24", 0))),
+                "h6": int(float(vol.get("h6", 0))),
+                "h1": int(float(vol.get("h1", 0))),
             },
-            "pair_address": pair.get("pairAddress"),
             "pair_created": pair.get("pairCreatedAt"),
             "dexs": pair.get("url"),
-            "dext": info.get("dextools"),
-            "socials": socials,
-            "lp_burned": lp_burned,
+            "dext": pair.get("info", {}).get("dextools"),
+            "socials": {
+                s["type"]: s["url"]
+                for s in pair.get("info", {}).get("socials", [])
+            }
         }
+
+        _set_cache(ca, result)
+        return result
 
     except Exception:
         return None
 
 
-# ───────── Helpers ─────────
-
 def volume_spike(vol: dict) -> bool:
-    """
-    Detect unusual volume spike (1h vs 24h)
-    """
     try:
-        if not vol or vol.get("h24", 0) == 0:
+        if vol["h24"] == 0:
             return False
-        return vol.get("h1", 0) / vol.get("h24", 1) > 0.4
+        return vol["h1"] / vol["h24"] >= 0.35
     except Exception:
         return False
 
 
-def candle_color(pct: float) -> str:
-    if pct > 0:
-        return "🟢"
-    if pct < 0:
-        return "🔴"
-    return "🟡"
-
-
-def trend_bias(changes: dict) -> str:
-    score = 0
-    if changes.get("m5", 0) > 0:
-        score += 1
-    if changes.get("h1", 0) > 0:
-        score += 1
-    if changes.get("h24", 0) > 0:
-        score += 1
-
-    if score >= 2:
-        return "🟢 Bullish"
-    if score == 1:
-        return "🟡 Neutral"
-    return "🔴 Bearish"
-
-
-def vwap_ema_bias(price: float, changes: dict) -> str:
-    """
-    Inference-based VWAP / EMA bias
-    (DexScreener does not expose real VWAP/EMA)
-    """
-    score = 0
-
-    # Short-term momentum
-    if changes.get("m5", 0) > 0:
-        score += 1
-    if changes.get("h1", 0) > 0:
-        score += 1
-
-    # Overextension heuristic
-    if changes.get("h24", 0) > 50:
-        score -= 1
-
-    if score >= 2:
-        return "🟢 Above VWAP / EMA (Bullish)"
-    if score == 1:
-        return "🟡 Near VWAP / EMA"
-    return "🔴 Below VWAP / EMA (Bearish)"
+def recent_launch(pair_created_ms):
+    if not pair_created_ms:
+        return False
+    age_hours = (time.time() * 1000 - pair_created_ms) / 3600000
+    return age_hours <= 24
