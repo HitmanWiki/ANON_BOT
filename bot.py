@@ -118,7 +118,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         market,
         lp_info,
         history=None,
-        caller_data=None
+        
     )
 
     # ───────── Buttons ─────────
