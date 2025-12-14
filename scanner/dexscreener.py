@@ -38,14 +38,10 @@ def fetch_dex_data(ca: str):
             key=lambda p: float(p.get("liquidity", {}).get("usd", 0))
         )
 
-        price = float(pair.get("priceUsd", 0))
         changes = pair.get("priceChange", {})
         vol = pair.get("volume", {})
         txns = pair.get("txns", {}).get("h24", {})
 
-        liq_usd = float(pair.get("liquidity", {}).get("usd", 0))
-
-        socials = {}
         info = pair.get("info", {})
 
         socials = {
@@ -53,53 +49,43 @@ def fetch_dex_data(ca: str):
             for s in info.get("socials", [])
         }
 
-        # Add websites
+        # ✅ Website support
         websites = info.get("websites", [])
-        if websites:
-            socials["website"] = websites[0].get("url")
-
-        
-
+        if websites and websites[0].get("url"):
+            socials["website"] = websites[0]["url"]
 
         result = {
-        "price": price,
-        "price_change": {
-            "m5": float(changes.get("m5", 0)),
-            "h1": float(changes.get("h1", 0)),
-            "h24": float(changes.get("h24", 0)),
-        },
-        "mc": int(float(pair.get("fdv", 0))),
-        "liq": int(float(pair.get("liquidity", {}).get("usd", 0))),
-        "txns": {
-            "buys": int(txns.get("buys", 0)),
-            "sells": int(txns.get("sells", 0)),
-        },
-        "vol": {
-            "h24": int(float(vol.get("h24", 0))),
-            "h6": int(float(vol.get("h6", 0))),
-            "h1": int(float(vol.get("h1", 0))),
-        },
-
-        # 🔥 REQUIRED FOR LP ANALYSIS
-        "pair_address": pair.get("pairAddress"),
-        "chain_id": pair.get("chainId"),
-
-        "pair_created": pair.get("pairCreatedAt"),
-        "dexs": pair.get("url"),
-        "dext": pair.get("info", {}).get("dextools"),
-
-        "socials": {
-            s["type"]: s["url"]
-            for s in pair.get("info", {}).get("socials", [])
-        },
-    }
-
+            "price": float(pair.get("priceUsd", 0)),
+            "price_change": {
+                "m5": float(changes.get("m5", 0)),
+                "h1": float(changes.get("h1", 0)),
+                "h24": float(changes.get("h24", 0)),
+            },
+            "mc": int(float(pair.get("fdv", 0))),
+            "liq": int(float(pair.get("liquidity", {}).get("usd", 0))),
+            "txns": {
+                "buys": int(txns.get("buys", 0)),
+                "sells": int(txns.get("sells", 0)),
+            },
+            "vol": {
+                "h24": int(float(vol.get("h24", 0))),
+                "h6": int(float(vol.get("h6", 0))),
+                "h1": int(float(vol.get("h1", 0))),
+            },
+            "pair_address": pair.get("pairAddress"),
+            "chain_id": pair.get("chainId"),
+            "pair_created": pair.get("pairCreatedAt"),
+            "dexs": pair.get("url"),
+            "dext": info.get("dextools"),
+            "socials": socials,   # ✅ FIXED
+        }
 
         _set_cache(ca, result)
         return result
 
-    except Exception:
+    except Exception as e:
         return None
+
 
 
 # -------- Helpers --------
