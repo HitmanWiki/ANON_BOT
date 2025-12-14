@@ -146,7 +146,7 @@ def format_report(t, verdict, market, lp_info, history):
         "",
         "━━━━━━━━━━━━",
         "📢 Place your ads here",
-        "👉 Contact: @Bobwhale1",
+        "👉 Contact: @An0N55",
         "",
         "⚠️ Disclaimer",
         "This report is automated and for informational purposes only.",

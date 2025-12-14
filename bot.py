@@ -102,12 +102,13 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     lp_info = {"status": "unknown"}
 
     data = {
-        "name": token["name"],
-        "symbol": token["symbol"],
-        "owner_renounced": token["owner_renounced"],
+        "name": token.get("name", "Unknown"),
+        "symbol": token.get("symbol", "UNKNOWN"),
+        "owner_renounced": token.get("owner_renounced", False),
         "trading": trading,
         "goplus": goplus,
     }
+
 
     verdict = verdict_engine(data)
 
